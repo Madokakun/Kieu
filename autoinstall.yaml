@@ -1,0 +1,151 @@
+#cloud-config
+autoinstall:
+  version: 1
+
+  # identity / hostname / user
+  identity:
+    hostname: "Predator-phn16-71"
+    username: quang
+    password: '$6$zNpEQ7HU.RVivHPi$t6.ebIZybOlTVFdwcdzMQXvZ02zzaBedjFjbZdL94fgK/P1e/8AeNsoFG59L.Lj3V933tSPIarOsCVqbcT.TO0'
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+    variant: ''
+  timezone: Asia/Bangkok
+
+  # Use default Ubuntu mirrors
+  apt:
+    preserve_sources_list: true
+
+  # Kernel: use HWE generic for 24.04
+  kernel:
+    package: linux-generic-hwe-24.04
+
+  # Minimal desktop source (desktop installer)
+  source:
+    id: ubuntu-desktop
+    search_drivers: true
+
+  # Storage: EFI + root (96.1GB) + swap (4GB) + remainder unused (no separate /home)
+  storage:
+    layout:
+      name: custom
+    config:
+      - id: disk0
+        type: disk
+        match:
+          size: largest
+        ptable: gpt
+      - id: efi
+        type: partition
+        device: disk0
+        size: 513M
+        flag: boot
+      - id: root
+        type: partition
+        device: disk0
+        size: 96100M
+      - id: swap
+        type: partition
+        device: disk0
+        size: 4096M
+      - id: fsefi
+        type: format
+        fstype: fat32
+        volume: efi
+      - id: fsroot
+        type: format
+        fstype: ext4
+        volume: root
+      - id: mountroot
+        type: mount
+        path: /
+        device: fsroot
+      - id: addswap
+        type: format
+        fstype: swap
+        volume: swap
+
+  # Packages installed via apt
+  packages:
+    - build-essential
+    - git
+    - curl
+    - wget
+    - vim
+    - zip
+    - neofetch
+    - python3
+    - python3-pip
+    - openjdk-21-jdk
+    - docker.io
+    - docker-compose
+    - apache2
+    - mysql-server
+    - php
+    - php-mysql
+    - flatpak
+    - gnome-software-plugin-flatpak
+    - gnome-software
+    - snapd
+    - codeblocks
+
+  snaps:
+    - name: spotify
+      channel: stable
+      classic: false
+    - name: code
+      channel: stable
+      classic: true
+    - name: microsoft-edge
+      channel: stable
+      classic: false
+    - name: wps-office
+      channel: stable
+      classic: false
+
+  # late-commands run inside the installed system (target = /target)
+  late-commands:
+    # enable docker service
+    - curtin in-target --target=/target -- systemctl enable docker
+
+    # ensure basic packages and add toolchain PPA for gcc-13/g++-13
+    - curtin in-target --target=/target -- apt-get update
+    - curtin in-target --target=/target -- apt-get install -y software-properties-common ca-certificates apt-transport-https gnupg lsb-release
+    - curtin in-target --target=/target -- add-apt-repository -y ppa:ubuntu-toolchain-r/test
+    - curtin in-target --target=/target -- apt-get update
+    - curtin in-target --target=/target -- apt-get install -y gcc-13 g++-13
+
+    # install Node.js (NodeSource)
+    - curtin in-target --target=/target -- bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -"
+    - curtin in-target --target=/target -- apt-get install -y nodejs
+
+    # enable flatpak + Flathub and install Flatpak apps (Notion/Calendar/Zalo/TradingView if available)
+    - curtin in-target --target=/target -- flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    - curtin in-target --target=/target -- flatpak install -y flathub com.github.notionapp.Notion || true
+    - curtin in-target --target=/target -- flatpak install -y flathub io.github.notionapp.Calendar || true
+    - curtin in-target --target=/target -- flatpak install -y flathub com.zalo.desktop || true
+    - curtin in-target --target=/target -- flatpak install -y flathub com.tradingview.TradingView || true
+
+    # install MetaTrader5 (if available online)
+    - curtin in-target --target=/target -- bash -c "wget -O /tmp/mt5.deb https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/linux/metatrader5.deb || true"
+    - curtin in-target --target=/target -- bash -c "if [ -f /tmp/mt5.deb ]; then apt-get install -y /tmp/mt5.deb || (apt-get -f install -y && apt-get install -y /tmp/mt5.deb); fi"
+
+    # ensure snaps are installed (snap install may run even if added above)
+    - curtin in-target --target=/target -- snap install spotify || true
+    - curtin in-target --target=/target -- snap install code --classic || true
+    - curtin in-target --target=/target -- snap install microsoft-edge || true
+    - curtin in-target --target=/target -- snap install wps-office || true
+
+    # add user to sudo group (user already created via identity)
+    - curtin in-target --target=/target -- usermod -aG sudo quang
+
+    # ensure password is set (redundant because identity.password present, but kept for safety)
+    - curtin in-target --target=/target -- bash -c "echo 'quang:1' | chpasswd"
+
+    # final update & upgrade
+    - curtin in-target --target=/target -- apt-get update
+    - curtin in-target --target=/target -- apt-get upgrade -y
+
+  # End of autoinstall
